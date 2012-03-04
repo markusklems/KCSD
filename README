@@ -1,0 +1,4 @@
+KIT Cloud Serving Deployment (KCSD) Tool
+=================================
+
+KCSD Tool helps you to set up an infrastructure in EC2 environment and deploy binary code rapidly via murder into this infrastructure.

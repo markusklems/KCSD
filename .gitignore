@@ -1,0 +1,5 @@
+# contains all files that should not be in GitHub repository
+*~ # temporary files for Emacs
+pem/* # all private keys
+MURDER/ # for the distribution via murder
+

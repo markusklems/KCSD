@@ -1,0 +1,2 @@
+# contain all pattern for ignoring files that should not be in GitHub
+*~ # temporary files from emacs

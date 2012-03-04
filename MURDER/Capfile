@@ -1,0 +1,423 @@
+# @author: lha
+# Capfile with murder config for the Murder Server
+# the Murder Server uses this Capfile to control the distribution process
+
+load 'deploy' if respond_to?(:namespace) # cap2 differentiator
+Dir['vendor/gems/*/recipes/*.rb','vendor/plugins/*/recipes/*.rb'].each { |plugin| load(plugin) }
+
+# =============================================================================================================
+# REQUIRED GEMS
+require 'rubygems'
+
+# murder for the distribution
+require 'murder'
+
+# yaml for editing the cassandra.yaml file
+require 'yaml'
+
+# fileutils for manipulating files and directories in murder server
+require 'fileutils'
+
+
+
+# =============================================================================================================
+# HELP VARIABLES
+# nodes array contains all private IPs of machines (seeder and peers) in the infrastructure
+# capistrano reads the n_ips.txt file and parses it into the nodes array
+# this n_ips.txt list file is uploaded from chef-workstation
+nodes = []
+
+# check if the file exists or not
+# if yes, read the file and pass it to nodes array
+# if no, warning
+if (FileTest.exist?("#{ENV['HOME']}/murder/n_ips.txt"))
+	File.open("n_ips.txt") do |f|
+		nodes = f.each_line.map{|l| l.chomp}
+	end
+else
+	puts "Murder Server needs the n_ips.txt to get the private IP addresses of all nodes"
+	exit(1)
+end
+
+# get the private IP of Murder
+server = []
+if (FileTest.exist?("#{ENV['HOME']}/murder/murder_ip.txt"))
+	File.open("murder_ip.txt") do |f|
+		server = f.each_line.map{|l| l.chomp}
+	end
+else
+	puts "Murder Server needs the murder_ip.txt to get the private IP address of Murder Server"
+	exit(1)
+end
+
+# agent path on each Cassandra node
+agent_path = "#{ENV['HOME']}/agent"
+
+# Cassandra's folders
+cassandra_data = "/var/lib/cassandra"
+cassandra_log = "/var/log/cassandra"
+
+# OpsCenter's folder
+opscenter_path = "#{ENV['HOME']}/opscenter"
+
+# =============================================================================================================
+# MURDER RELATED VARIABLES
+# application name
+set :application, 'cassandra-distribution'
+
+# all commands are executed in remoted machines as root
+#set :use_sudo, true 
+
+# the user of the systems that capistrano uses to log in
+set :user, 'ubuntu'
+
+# the private key which capistrano uses to access multiple
+ssh_options[:keys] = ["#{ENV['HOME']}/murder/chef-ec2.pem"] 
+
+# the files in web
+set :source_files_path, 'http://apache.lauf-forum.at//cassandra/1.0.7/apache-cassandra-1.0.7-bin.tar.gz'
+
+# tempory directory
+set :temp_path, '/tmp'
+
+# the tag specifies which source files will be distributed
+#set :default_tag, 'dist_cassandra'
+set :tag, 'dist_cassandra'
+
+# location for the related murder's files in every machines (seeder and peers)
+#set :remote_murder_path, "#{ENV['HOME']}/murder" 
+set :murder_path, "#{ENV['HOME']}/murder"
+
+# location for the distributed files in seeder
+# this is also the location for the distributed files in murder server
+#set :default_seeder_files_path, "#{ENV['HOME']}/cassandra" 
+
+# location for the distributed files in peers
+#set :default_destination_path, "#{ENV['HOME']}/cassandra"
+
+# location for the distributed files in all nodes (seeder/tracker/peers) and in Murder Server as well
+set :distribution_path, "#{ENV['HOME']}/cassandra"
+
+#set :scm, 'git'
+#set :scm, 'none'
+#set :repository, 'https://github.com/apache/cassandra.git'
+#set :copy_exclude, '.git'
+
+# use murder
+#set :deploy_via, :murder
+
+
+
+# =============================================================================================================
+# use it if you want to deploy with murder strategy
+# convenient hooks
+#after 'deploy:setup', 'murder:distribute_files' # setup remote murder support files on all hosts
+#before 'murder:start_seeding', 'murder:start_tracker' # let deploy manage the tracker as well
+#after 'murder:stop_seeding', 'murder:stop_tracker'
+
+# define an app server role
+# role :app, *(nodes.map{|n| "#{n}" })
+
+# murder roles (optional. seeder/tracker will default to the first deployable server) 
+# the first machine in nodes array is the seeder/tracker
+role :tracker, nodes[0]
+role :seeder, nodes[0]
+
+# peer role defaults to all deployable servers (all except :no_release => true)
+# you shouldn't need to set this if you are using the deploy strategy.
+# all machines are peers
+role :peer, *(nodes.map{|n| "#{n}" })
+
+
+
+# =============================================================================================================
+# THE TASKS FOR MURDER SERVER
+namespace :kcsd do
+
+	# ====================================================================================== #
+	# @author: lha
+	# Clean up everything from the last distribution
+	# ====================================================================================== #
+	# Clean up everything from the last distribution
+	desc 'Clean up everything from the last distribution in all Nodes and Murder Server'
+	task :clean_everything, :roles => :peer do
+	
+		# the location of murder supported files
+		#run "rm -rf #{murder_path}"
+
+		# the location of the distributed files
+		puts ":::::::::::::::::: Deleting the Distribution folder"
+		run "rm -rf #{distribution_path}"
+
+		# the location of the temporary files
+		puts ":::::::::::::::::: Deleting the Temporary folder"
+		run "rm -rf #{temp_path}/*"
+
+		# the location of Cassandra
+		puts ":::::::::::::::::: Deleting the Cassandra's folders"
+		run "sudo rm -rf #{cassandra_data}"
+		run "sudo rm -rf #{cassandra_log}"
+
+		# the location of OpsCenter agent on each node
+		puts ":::::::::::::::::: Deleting the Agent folder"
+		run "rm -rf #{agent_path}"
+
+		# clean the temporary folder in Murder Server
+		puts ":::::::::::::::::: Deleting the Temporary folder in Murder Server"
+		puts ":::::::::::::::::: Deleting the OpsCenter folder in Murder Server"
+		system "rm -rf #{temp_path}/*"
+		system "rm -rf #{opscenter_path}"
+		 
+	end
+
+
+
+	# ====================================================================================== #
+	# @author: lha
+	# Configure Cassandra in all nodes
+	# ====================================================================================== #
+	desc 'Configure Cassanda in all nodes of the cluster'
+	task :configure_cassandra, :roles => :peer do
+		
+		# cassandra.yaml
+		if (FileTest.exist?("#{murder_path}/cassandra.yaml"))		
+			config = YAML::load(File.open("cassandra.yaml"))
+		else
+			puts "Murder Server needs the cassandra.yaml file"
+			exit(1)
+		end
+		
+		# cassandra-env.sh
+		# problem: JMX port
+		if !(FileTest.exist?("#{murder_path}/cassandra-env.sh"))		
+			puts "Murder Server needs the cassandra-env.sh file"
+			exit(1)
+		end
+
+		# edit the cassandra.yaml file
+		# SEEDS
+		config["seed_provider"][0]["parameters"][0]["seeds"] = "" # seeds parameter first is blank	
+		seeds = "" # seeds variable contains the IP addresses of all seeds
+		number_of_seeds = (nodes.size()/2) # 1/2 of all nodes in the cluster are seeds
+		for i in 0..number_of_seeds-1 do # get the IP addresses for seeds from the nodes array
+			seeds << nodes[i]
+			seeds << ","
+		end
+		seeds = seeds[0..-2] # delete the last comma
+		config["seed_provider"][0]["parameters"][0]["seeds"] = seeds # set the seeds parameter
+
+		i = 0
+    hosts = nodes.size
+		nodes.each do |node|
+          node.chomp!
+					config["cluster_name"] = "KCSD Cluster"
+          config["listen_address"] = node 
+          config["rpc_address"] = node
+			
+					config["initial_token"] = i * ((2 ** 127) / hosts)
+          puts "#{node} #{i} #{config['initial_token']}"
+         
+          File.open("#{temp_path}/#{node}", "w") do |out|
+              YAML::dump(config, out)
+          end
+
+					i+=1
+     end
+
+		# upload the modified cassandra.yaml to each node
+		upload("#{temp_path}/$CAPISTRANO:HOST$", "#{distribution_path}/conf/cassandra.yaml")
+
+		# edit cassandra-env.sh
+		nodes.each do |node|
+          node.chomp!
+          
+					# edit the cassandra-env.sh and clone to another file
+					system "cp #{murder_path}/cassandra-env.sh #{temp_path}/#{node}"
+					system "sed -i \"s/<public name>/#{node}/g\" #{temp_path}/#{node}"
+    end
+
+		# upload the edited cassandra-env.sh to node
+		upload("#{temp_path}/$CAPISTRANO:HOST$", "#{distribution_path}/conf/cassandra-env.sh")
+
+		# Cassandra's directories in all nodes
+		run "sudo mkdir -p #{cassandra_data}" # data directory for Cassandra
+		run "sudo mkdir -p #{cassandra_log}" # log directory for Cassandra
+		run "sudo chown -R $USER #{cassandra_data}" # change the ownership for the Linux user, in order to use the data folder
+		run "sudo chown -R $USER #{cassandra_log}" # change the ownership for the Linux user, in order to use the data folder
+
+	end
+
+
+
+	# ====================================================================================== #
+	# @author: lha
+	# Start Cassandra in all nodes
+	# Cassandra is installed in each node with a Tarball
+	# Therefore start Cassandra as a service is impossible
+	# start Cassandra with the script
+	# ====================================================================================== #
+	desc 'Start Cassandra in all nodes of the cluster'
+	task :start_cassandra, :roles => :peer do
+		# the process id of cassandra will be saved in pid file
+		# that will be used to kill Cassandra process
+		#run "#{distribution_path}/bin/./cassandra -f" # foreground
+		run "#{distribution_path}/bin/./cassandra" # background
+	end
+
+
+
+	# ====================================================================================== #
+	# @author: lha
+	# Stop Cassandra in all nodes
+	# ====================================================================================== #
+	desc 'Stop Cassandra in all nodes of the cluster'
+	task :stop_cassandra, :roles => :peer do
+		run "pkill -9 -f 'cassandra'"
+	end
+
+
+	
+	# ====================================================================================== #
+	# @author: lha
+	# Install OpsCenter in Murder Server
+	# Install OpsCenter Agents in Cassandra nodes
+	# ====================================================================================== #
+	desc 'Install OpsCenter on Murder Server and Install OpsCenter Agent in Cassandra Nodes'
+	task :install_opscenter, :roles => :peer do
+		
+		# ====================================================================================== #
+		# INSTALL OPSCENTER IN MURDER SERVER
+
+
+		if (FileTest.exist?("#{opscenter_path}"))
+			system "rm -rf #{opscenter_path}"		
+		end
+
+
+		#if !(FileTest.exist?("#{ENV['HOME']}/opscenter"))
+			# INFO
+			puts ":::::::::::::::::: DataStax OpsCenter is not installed!!!"
+			puts ":::::::::::::::::: Installing DataStax OpsCenter from tarball"			
+			puts ":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::"
+			# create the OpsCenter folder
+			puts ":::::::::::::::::: Creating the OpsCenter folder"
+			system "mkdir #{opscenter_path}"
+
+			# download the tarball of OpsCenter
+			puts ":::::::::::::::::: Downloading the tarball from DataStax"
+			system "wget http://downloads.datastax.com/community/opscenter.tar.gz -nv -O #{temp_path}/opscenter.tar.gz"
+
+			# untar it into the OpsCenter
+			puts ":::::::::::::::::: Untar the downloaded tarball into the OpsCenter folder"
+			system "tar -xzf #{temp_path}/opscenter.tar.gz --strip-components=1 -C #{opscenter_path}"
+		#end
+		
+		# ====================================================================================== #
+		# CONFIGURE OPSCENTER IN MURDER SERVER
+		# INFO
+		puts ":::::::::::::::::: Configuring DataStax OpsCenter to monitor the Cassandra Cluster"
+		puts ":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::"
+		
+		# the web server interface is the IP address for WebServer
+		puts ":::::::::::::::::: Setting the IP Address for OpsCenter WebServer"		
+		system "sed -i \"s/interface = .*/interface = #{server[0]}/g\" #{opscenter_path}/conf/opscenterd.conf"
+
+		# the seeds in Cassandra cluster
+		# exact the same parameter in cassandra.yaml
+		puts ":::::::::::::::::: Setting the Seeds for Cassandra cluster"
+
+		seeds = "" # seeds variable contains the IP addresses of all seeds
+		number_of_seeds = (nodes.size()/2) # 1/2 of all nodes in the cluster are seeds
+		for i in 0..number_of_seeds-1 do # get the IP addresses for seeds from the nodes array
+			seeds << nodes[i]
+			seeds << ","
+		end
+		seeds = seeds[0..-2] # delete the last comma
+
+		system "sed -i \"s/seed_hosts = .*/seed_hosts = #{seeds}/g\" #{opscenter_path}/conf/opscenterd.conf"
+
+		# the Thrift RPC port
+		puts ":::::::::::::::::: Setting the Thrift RPC port for Cassandra cluster"
+		system "sed -i \"s/#api_port.*/api_port = 9160/g\" #{opscenter_path}/conf/opscenterd.conf"
+
+		# ====================================================================================== #
+		# SETUP OPSCENTER IN MURDER SERVER
+		# this process will
+		# 1. create the SSL for OpsCenter
+		# 2. create agent.tar.gz. This file will be use to install OpsCenter Agent on Cassandra nodes
+		puts ":::::::::::::::::: Setting up DataStax OpsCenter for the Cassandra cluster"
+		puts ":::::::::::::::::: This process will"
+		puts ":::::::::::::::::: 1. create the SSL for OpsCenter"
+		puts ":::::::::::::::::: 2. create a agent.tar.gz which will be used to install agents on Cassandra nodes"
+		puts ":::::::::::::::::: The process takes a minute. Please wait!!!"			
+		system "#{opscenter_path}/bin/./setup.py"
+
+		# ====================================================================================== #
+		# INSTALL OPSCENTER AGENTS TO ALL CASSANDRA NODES
+		# install libssl0.9.8 package
+		puts ":::::::::::::::::: Installing libssl0.9.8"
+		run "sudo apt-get install libssl0.9.8 -y"
+
+		# install sysstat package
+		puts ":::::::::::::::::: Installing sysstat"
+		run "sudo apt-get install sysstat -y"
+		
+		# upload the agent.tar.gz created by OpsCenter to all Cassandara Nodes
+		puts ":::::::::::::::::: Uploading the new created agent.tar.gz file to all nodes"
+		upload("#{opscenter_path}/agent.tar.gz","#{temp_path}/agent.tar.gz")
+		
+		# create the Agent folder
+		puts ":::::::::::::::::: Creating the agent folder"
+		run "mkdir #{agent_path}"
+
+		# untar the agent.tar.gz into the folder agent
+		puts ":::::::::::::::::: Untaring the agent.tar.gz into the agent folder"
+		run "tar -xzf #{temp_path}/agent.tar.gz --strip-components=1 -C #{agent_path}"
+
+		# setup agent
+		puts ":::::::::::::::::: Setting up agent for this Cassandra node"
+		run "#{agent_path}/bin/./setup #{server[0]} $CAPISTRANO:HOST$"
+
+	end
+
+
+
+	# ====================================================================================== #
+	# @author: lha
+	# Start OpsCenter in Murder Server and OpsCenter Agents in Cassandra Nodes
+	# ====================================================================================== #
+	desc 'Start OpsCenter on Murder Server and OpsCenter Agent in Cassandra Nodes'
+	task :start_opscenter, :roles => :peer do
+	
+		# start OpsCenter
+		puts ":::::::::::::::::: Starting OpsCenter"
+		#system "#{opscenter_path}/bin/./opscenter -f" # foreground
+		system "#{opscenter_path}/bin/./opscenter" # background
+
+		# run agent in foreground
+		puts ":::::::::::::::::: Running Agent"
+		#run "#{agent_path}/bin/./opscenter-agent -f" # foreground
+		run "#{agent_path}/bin/./opscenter-agent" # background
+
+	end
+
+
+
+	# ====================================================================================== #
+	# @author: lha
+	# Stop OpsCenter in Murder Server and OpsCenter Agens in Cassandra Nodes
+	# ====================================================================================== #
+	desc 'Stop OpsCenter in Murder Server and OpsCenter Agents in Cassandra Nodes'
+	task :stop_opscenter, :roles => :peer do
+	
+		# stop OpsCenter
+		puts ":::::::::::::::::: Stopping OpsCenter"
+		system "pkill -9 -f './bin/twistd'"
+
+		# stop Agents
+		puts ":::::::::::::::::: Stopping Agent"
+		run "pkill -9 -f 'opscenter'" # background
+
+	end
+
+end

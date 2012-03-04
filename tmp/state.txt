@@ -1,0 +1,20 @@
+Instance ID      Public IP        Private IP       Flavor           Image            SSH Key          Security Groups  State          
+i-79fa791c       184.73.174.216   10.46.210.125    m1.large         ami-6fa27506     chef-ec2         OPEN             running        
+i-8df98be8                                         m1.small         ami-71dc0b18     chef-ec2         OPEN             stopped        
+i-69e0920c                                         m1.small         ami-71dc0b18     chef-ec2         OPEN             stopped        
+i-07e49662       50.16.14.65      10.194.242.112   m1.small         ami-71dc0b18     chef-ec2         OPEN             running        
+i-d5e99bb0                                         m1.small         ami-71dc0b18     chef-ec2         OPEN             stopped        
+i-21d3a144       184.73.7.35      10.243.95.194    m1.small         ami-71dc0b18     chef-ec2         OPEN             running        
+i-55d4a630                                         m1.small         ami-71dc0b18     chef-ec2         OPEN             stopped        
+i-dfd8aaba                                         m1.small         ami-71dc0b18     chef-ec2         OPEN             stopped        
+i-35ddaf50       23.20.51.233     10.98.133.231    m1.small         ami-71dc0b18     chef-ec2         OPEN             running        
+i-9dc1b3f8                                         m1.small         ami-71dc0b18     chef-ec2         OPEN             stopped        
+i-8fcab8ea                                         m1.small         ami-71dc0b18     chef-ec2         OPEN             stopped        
+i-35cfbd50       184.73.6.71      10.202.65.130    m1.small         ami-71dc0b18     chef-ec2         OPEN             running        
+i-7b3f421e                                         m1.small         ami-71dc0b18     chef-ec2         OPEN             stopped        
+i-fd3a4798                                         m1.small         ami-71dc0b18     chef-ec2         OPEN             stopped        
+i-3d364b58       184.72.180.113   10.205.7.92      m1.small         ami-71dc0b18     chef-ec2         OPEN             running        
+i-872d50e2                                         m1.small         ami-71dc0b18     chef-ec2         OPEN             stopped        
+i-c92855ac                                         m1.small         ami-71dc0b18     chef-ec2         OPEN             stopped        
+i-a7265bc2                                         m1.small         ami-71dc0b18     chef-ec2         OPEN             stopped        
+i-b7a4e0d2       23.21.229.188    10.32.81.250     m1.large         ami-6fa27506     chef-ec2         OPEN             running        

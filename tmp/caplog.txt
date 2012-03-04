@@ -1,0 +1,3 @@
+  * executing `rabbitmq'
+  * executing "sudo rabbitmqctl add_vhost /chef"
+    servers: ["184.73.174.216"]
